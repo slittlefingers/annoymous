@@ -1,0 +1,287 @@
+--- a/c/engine.cc
++++ b/c/engine.cc
+@@ -796,6 +796,24 @@
+   }
+ }
+ 
++int litert_lm_engine_settings_set_npu_token_id_scrubbing(
++    LiteRtLmEngineSettings* settings, bool enabled) {
++  if (!settings || !settings->settings) {
++    litert::lm::c::SetLastError(absl::InvalidArgumentError(
++        "Invalid engine settings for NPU token-ID scrubbing."));
++    return -1;
++  }
++  auto& main_settings = settings->settings->GetMutableMainExecutorSettings();
++  auto config = main_settings.MutableBackendConfig<litert::lm::NpuConfig>();
++  if (!config.ok()) {
++    litert::lm::c::SetLastError(config.status());
++    return -1;
++  }
++  config->enable_token_id_scrubbing = enabled;
++  main_settings.SetBackendConfig(*config);
++  return 0;
++}
++
+ void litert_lm_engine_settings_set_prefill_chunk_size(
+     LiteRtLmEngineSettings* settings, int prefill_chunk_size) {
+   if (settings && settings->settings) {
+--- a/c/engine.h
++++ b/c/engine.h
+@@ -630,6 +630,18 @@
+ void litert_lm_engine_settings_set_litert_dispatch_lib_dir(
+     LiteRtLmEngineSettings* settings, const char* lib_dir);
+ 
++// Enables token-ID scrubbing in the specialized TF_LITE_AUX NPU executor.
++// Disabled by default. Set before creating the engine. True clears consumed
++// text IDs while preserving positions, the frontier/pending token and negative
++// multimodal sentinels; it also clears the processed-token array on reset and
++// context restore. This does not erase KV or token copies elsewhere in memory.
++// Engines using the generic NPU compiler-plugin path reject this option.
++// Returns 0 on success, -1 for invalid settings or a non-NPU backend; use
++// litert_lm_get_last_error_message() for details. This is a fork extension.
++LITERT_LM_C_API_EXPORT
++int litert_lm_engine_settings_set_npu_token_id_scrubbing(
++    LiteRtLmEngineSettings* settings, bool enabled);
++
+ // Represents the activation data type.
+ //
+ // Added in version 0.1.0.
+--- a/runtime/engine/litert_lm_advanced_main.cc
++++ b/runtime/engine/litert_lm_advanced_main.cc
+@@ -344,6 +344,8 @@
+   settings.use_hw_cache_update_for_npu =
+       absl::GetFlag(FLAGS_use_hw_cache_update_for_npu);
+   settings.use_hw_ple_for_npu = absl::GetFlag(FLAGS_use_hw_ple_for_npu);
++  settings.enable_npu_token_id_scrubbing =
++      absl::GetFlag(FLAGS_enable_npu_token_id_scrubbing);
+   settings.enable_npu_debug_logging =
+       absl::GetFlag(FLAGS_enable_npu_debug_logging);
+   settings.disable_input_prompt_as_hint =
+--- a/runtime/engine/litert_lm_lib.cc
++++ b/runtime/engine/litert_lm_lib.cc
+@@ -731,6 +731,10 @@
+     gpu_artisan_settings.use_submodel = settings.use_submodel;
+     executor_settings.SetBackendConfig(gpu_artisan_settings);
+   }
++  if (settings.enable_npu_token_id_scrubbing && backend != Backend::NPU) {
++    return absl::InvalidArgumentError(
++        "NPU token-ID scrubbing requires the NPU backend.");
++  }
+   if (backend == Backend::NPU) {
+     auto& executor_settings = engine_settings.GetMutableMainExecutorSettings();
+     ABSL_ASSIGN_OR_RETURN(
+@@ -743,6 +747,8 @@
+         settings.use_hw_cache_update_for_npu;
+     npu_settings.use_hw_ple_for_npu = settings.use_hw_ple_for_npu;
+     npu_settings.enable_npu_debug_logging = settings.enable_npu_debug_logging;
++    npu_settings.enable_token_id_scrubbing =
++        settings.enable_npu_token_id_scrubbing;
+     executor_settings.SetBackendConfig(npu_settings);
+   }
+   const std::optional<Backend> sampler_backend = GetSamplerBackend(settings);
+--- a/runtime/engine/litert_lm_lib.h
++++ b/runtime/engine/litert_lm_lib.h
+@@ -149,6 +149,7 @@
+   bool use_hw_ple_for_npu = true;
+   bool enable_npu_debug_logging = false;
+   bool disable_input_prompt_as_hint = false;
++  bool enable_npu_token_id_scrubbing = false;
+ };
+ 
+ struct LitertLmMetrics {
+--- a/runtime/engine/litert_lm_main.cc
++++ b/runtime/engine/litert_lm_main.cc
+@@ -152,6 +152,18 @@
+     executor_settings.SetBackendConfig(cpu_settings);
+   }
+ 
++  if (absl::GetFlag(FLAGS_enable_npu_token_id_scrubbing)) {
++    if (backend != Backend::NPU) {
++      return absl::InvalidArgumentError(
++          "--enable_npu_token_id_scrubbing requires --backend=npu.");
++    }
++    auto& executor_settings = engine_settings.GetMutableMainExecutorSettings();
++    ABSL_ASSIGN_OR_RETURN(auto npu_settings,
++                         executor_settings.MutableBackendConfig<litert::lm::NpuConfig>());
++    npu_settings.enable_token_id_scrubbing = true;
++    executor_settings.SetBackendConfig(npu_settings);
++  }
++
+   // Create the engine.
+   ABSL_ASSIGN_OR_RETURN(auto engine, litert::lm::EngineFactory::CreateDefault(
+                                          std::move(engine_settings)));
+--- a/runtime/engine/shared_flags.cc
++++ b/runtime/engine/shared_flags.cc
+@@ -195,6 +195,11 @@
+ ABSL_FLAG(bool, use_hw_cache_update_for_npu, true,
+           "If true, use HW cache update for NPU.");
+ ABSL_FLAG(bool, use_hw_ple_for_npu, true, "If true, use HW PLE for NPU.");
++ABSL_FLAG(bool, enable_npu_token_id_scrubbing, false,
++          "Opt in to clearing consumed token IDs and token storage on reset/"
++          "context restore in the specialized TF_LITE_AUX NPU executor. "
++          "Disabled by default; preserves the frontier and multimodal sentinels. "
++          "Does not erase all process memory or KV cache.");
+ ABSL_FLAG(bool, enable_npu_debug_logging, false,
+           "If true, enable debug logging for NPU.");
+ ABSL_FLAG(
+--- a/runtime/engine/shared_flags.h
++++ b/runtime/engine/shared_flags.h
+@@ -84,6 +84,7 @@
+ ABSL_DECLARE_FLAG(bool, use_hw_cache_update_for_npu);
+ ABSL_DECLARE_FLAG(bool, use_hw_ple_for_npu);
+ ABSL_DECLARE_FLAG(bool, enable_npu_debug_logging);
++ABSL_DECLARE_FLAG(bool, enable_npu_token_id_scrubbing);
+ ABSL_DECLARE_FLAG(bool, disable_input_prompt_as_hint);
+ ABSL_DECLARE_FLAG(bool, gpu_enable_metal_residency_set);
+ 
+--- a/runtime/executor/llm_executor_processed_tokens.h
++++ b/runtime/executor/llm_executor_processed_tokens.h
+@@ -144,8 +144,8 @@
+   // candidates, including the vector's spare capacity (stale bytes left behind
+   // by a previously longer history), then empties it. Unlike RollBackToStep(0),
+   // which only resets the size and leaves the bytes resident in the heap
+-  // allocation, this guarantees the token ids no longer exist in process
+-  // memory. Intended for session teardown (Reset) and context switch, where the
++  // allocation. This only covers this vector's storage, not token copies or
++  // other process allocations. Intended for Reset and context switch, where the
+   // final size is expected to be 0.
+   void ScrubAll();
+ 
+--- a/runtime/executor/llm_executor_settings.cc
++++ b/runtime/executor/llm_executor_settings.cc
+@@ -69,6 +69,8 @@
+      << config.enable_neon_for_npu_greedy_sampling << "\n";
+   os << "use_hw_masking_for_npu: " << config.use_hw_masking_for_npu << "\n";
+   os << "use_hw_cache_update_for_npu: " << config.use_hw_cache_update_for_npu
++     << "\n";
++  os << "enable_token_id_scrubbing: " << config.enable_token_id_scrubbing
+      << "\n";
+   os << "enable_npu_debug_logging: " << config.enable_npu_debug_logging << "\n";
+   return os;
+--- a/runtime/executor/llm_executor_settings.h
++++ b/runtime/executor/llm_executor_settings.h
+@@ -160,6 +160,13 @@
+ 
+   // Whether enable debug logging for NPU.
+   bool enable_npu_debug_logging = false;
++
++  // Opt-in clearing of consumed token IDs in the specialized TF_LITE_AUX
++  // executor. Defaults off to preserve the original token-history behavior.
++  // Keeps vector size, the frontier/pending token and multimodal sentinels;
++  // also clears this executor's processed-token array on reset/context restore.
++  // Does not erase KV, token copies elsewhere, or arbitrary process memory.
++  bool enable_token_id_scrubbing = false;
+ };
+ std::ostream& operator<<(std::ostream& os, const NpuConfig& config);
+ 
+--- a/runtime/executor/llm_litert_compiled_model_executor_factory.cc
++++ b/runtime/executor/llm_litert_compiled_model_executor_factory.cc
+@@ -218,11 +218,16 @@
+ #else
+   auto aux_model_buffer = resources.GetTFLiteModelBuffer(ModelType::kTfLiteAux);
+   if (!aux_model_buffer.ok() || aux_model_buffer->empty()) {
++    ABSL_ASSIGN_OR_RETURN(auto npu_settings,
++                          executor_settings.MutableBackendConfig<NpuConfig>());
++    if (npu_settings.enable_token_id_scrubbing) {
++      return absl::UnimplementedError(
++          "Token-ID scrubbing requires the specialized TF_LITE_AUX NPU "
++          "executor; it is not supported by the generic compiler-plugin path.");
++    }
+     ABSL_LOG(WARNING)
+         << "NPU backend requested, but TF_LITE_AUX is not packaged in the "
+            "model. Using the generic LiteRT compiler-plugin path.";
+-    ABSL_ASSIGN_OR_RETURN(auto npu_settings,
+-                     executor_settings.MutableBackendConfig<NpuConfig>());
+     npu_settings.use_generic_litert_compiler_plugin = true;
+     executor_settings.SetBackendConfig(npu_settings);
+     return CreateCpuOrGpuLlmLiteRtCompiledModelExecutor(executor_settings,
+--- a/runtime/executor/llm_litert_npu_compiled_model_executor.cc
++++ b/runtime/executor/llm_litert_npu_compiled_model_executor.cc
+@@ -891,7 +891,9 @@
+   ran_decode_ = true;
+   // Privacy: wipe consumed token-id values, keeping the frontier token and
+   // preserving the vector size (position accounting is unaffected).
+-  processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  if (npu_config_.enable_token_id_scrubbing) {
++    processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  }
+ 
+   return output_logits;
+ }
+@@ -948,7 +950,9 @@
+     ran_decode_ = true;
+     // Match DecodeLogits: wipe consumed history while preserving the frontier
+     // token and position accounting. The constrained path is scrubbed there.
+-    processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++    if (npu_config_.enable_token_id_scrubbing) {
++      processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++    }
+   }
+ 
+   std::shared_ptr<TokenData> last_output_token =
+@@ -998,7 +1002,9 @@
+       processed_tokens_.AddPendingInputToken({std::move(next_token)}));
+   current_step_++;
+   // Privacy: wipe consumed token-id values, keeping the frontier token.
+-  processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  if (npu_config_.enable_token_id_scrubbing) {
++    processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  }
+   latency_stats_.decode_token_queue_latency_us +=
+       absl::ToInt64Microseconds(absl::Now() - start_queue);
+ 
+@@ -1195,7 +1201,9 @@
+       processed_tokens_.AddPendingInputToken({std::move(first_token)}));
+   current_step_++;
+   // Privacy: wipe consumed token-id values, keeping the frontier token.
+-  processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  if (npu_config_.enable_token_id_scrubbing) {
++    processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  }
+ 
+   latency_stats_.decode_num_tokens++;
+   latency_stats_.decode_e2e_latency_us +=
+@@ -1356,7 +1364,9 @@
+   processed_tokens_.AddProcessedTokens(processed_input_tokens);
+   // Privacy: wipe consumed token-id values from the accumulated history,
+   // keeping the frontier token and preserving the vector size.
+-  processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  if (npu_config_.enable_token_id_scrubbing) {
++    processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  }
+   if (!processed_input_tokens.empty()) {
+     NPU_EXECUTOR_LOG(INFO) << "Prefill tokens: "
+                            << FormatFirstN<int>(processed_input_tokens);
+@@ -1704,7 +1714,9 @@
+   LITERT_RETURN_IF_ERROR(DecodeInternal(step, token));
+   current_step_ = step + 1;
+   // Privacy: wipe consumed token-id values, keeping the frontier token.
+-  processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  if (npu_config_.enable_token_id_scrubbing) {
++    processed_tokens_.ScrubConsumedValues(current_step_ - 1);
++  }
+   return absl::OkStatus();
+ }
+ 
+@@ -2210,7 +2222,9 @@
+   // Privacy: physically wipe the plaintext token-id bytes, symmetric to the
+   // ClearKVCache() calls below. RollBackToStep(0) only resets the size and
+   // leaves the token ids resident in the heap allocation.
+-  processed_tokens_.ScrubAll();
++  if (npu_config_.enable_token_id_scrubbing) {
++    processed_tokens_.ScrubAll();
++  }
+   latency_stats_ = {};
+   last_verify_activations_.clear();
+   pending_accepted_tokens_.clear();
+@@ -2277,7 +2291,9 @@
+   // Privacy: wipe the outgoing session's token-id bytes before the copy-assign
+   // below reuses this vector's buffer, which would otherwise leave the previous
+   // session's tokens resident in the spare capacity of the reused allocation.
+-  processed_tokens_.ScrubAll();
++  if (npu_config_.enable_token_id_scrubbing) {
++    processed_tokens_.ScrubAll();
++  }
+   processed_tokens_ = context_data->processed_context().processed_tokens();
+   if (context_data->runtime_config().sampler_params.has_value()) {
+     sampler_params_ = *context_data->runtime_config().sampler_params;

@@ -1,0 +1,339 @@
+--- a/runtime/engine/engine.h
++++ b/runtime/engine/engine.h
+@@ -329,6 +329,10 @@
+   }
+ 
+   // Get the current step of the session.
++  virtual absl::StatusOr<std::string> GetGhostDebugJson(const std::string& request) const {
++    return absl::UnimplementedError("Debug inspection is unavailable for this backend.");
++  }
++
+   virtual absl::StatusOr<int> GetCurrentStep() const {
+     return absl::UnimplementedError("GetCurrentStep not implemented.");
+   }
+--- a/runtime/executor/llm_executor_base.h
++++ b/runtime/executor/llm_executor_base.h
+@@ -103,6 +103,10 @@
+   };
+ 
+   // Gets the current step of the executor.
++  virtual absl::StatusOr<std::string> GetGhostDebugJson(const std::string& request) const {
++    return absl::UnimplementedError("Debug inspection is unavailable for this backend.");
++  }
++
+   virtual absl::StatusOr<int> GetCurrentStep() const {
+     return absl::UnimplementedError(absl::StrCat(
+         "GetCurrentStep not implemented for backend: ", ExecutorBackendName()));
+--- a/runtime/framework/resource_management/execution_manager.h
++++ b/runtime/framework/resource_management/execution_manager.h
+@@ -250,6 +250,11 @@
+   // - session_info: The session info of the session.
+   // Returns:
+   // - The current step of the session.
++  virtual absl::StatusOr<std::string> GetGhostDebugJson(
++      const SessionInfo& session_info, const std::string& request) {
++    return absl::UnimplementedError("Debug inspection is unavailable.");
++  }
++
+   virtual absl::StatusOr<int> GetCurrentStep(
+       const SessionInfo& session_info) = 0;
+ 
+--- a/runtime/framework/resource_management/serial_execution_manager.h
++++ b/runtime/framework/resource_management/serial_execution_manager.h
+@@ -212,6 +212,9 @@
+   // - session_info: The session info of the session.
+   // Returns:
+   // - The current step of the session.
++  absl::StatusOr<std::string> GetGhostDebugJson(
++      const SessionInfo& session_info, const std::string& request) override;
++
+   absl::StatusOr<int> GetCurrentStep(const SessionInfo& session_info) override;
+ 
+   // Sets the current step of the session to the target step.
+--- a/runtime/framework/resource_management/serial_execution_manager.cc
++++ b/runtime/framework/resource_management/serial_execution_manager.cc
+@@ -1144,6 +1144,13 @@
+                     cancelled, std::move(callback));
+ }
+ 
++absl::StatusOr<std::string> SerialExecutionManager::GetGhostDebugJson(
++    const SessionInfo& session_info, const std::string& request) {
++  ABSL_ASSIGN_OR_RETURN(auto executor,
++      resource_manager_->AcquireExecutorWithContextHandler(session_info.context_handler));
++  return executor->GetGhostDebugJson(request);
++}
++
+ absl::StatusOr<int> SerialExecutionManager::GetCurrentStep(
+     const SessionInfo& session_info) {
+   ABSL_ASSIGN_OR_RETURN(auto llm_executor,
+--- a/runtime/framework/resource_management/threaded_execution_manager.h
++++ b/runtime/framework/resource_management/threaded_execution_manager.h
+@@ -231,6 +231,9 @@
+   // - session_info: The session info of the session.
+   // Returns:
+   // - The current step of the session.
++  absl::StatusOr<std::string> GetGhostDebugJson(
++      const SessionInfo& session_info, const std::string& request) override;
++
+   absl::StatusOr<int> GetCurrentStep(const SessionInfo& session_info) override;
+ 
+   // Sets the current step of the session to the target step.
+--- a/runtime/framework/resource_management/threaded_execution_manager.cc
++++ b/runtime/framework/resource_management/threaded_execution_manager.cc
+@@ -1292,6 +1292,13 @@
+                     cancelled, std::move(callback));
+ }
+ 
++absl::StatusOr<std::string> ThreadedExecutionManager::GetGhostDebugJson(
++    const SessionInfo& session_info, const std::string& request) {
++  ABSL_ASSIGN_OR_RETURN(auto executor,
++      resource_manager_->AcquireExecutorWithContextHandler(session_info.context_handler));
++  return executor->GetGhostDebugJson(request);
++}
++
+ absl::StatusOr<int> ThreadedExecutionManager::GetCurrentStep(
+     const SessionInfo& session_info) {
+   ABSL_ASSIGN_OR_RETURN(auto llm_executor,
+--- a/runtime/core/session_advanced.h
++++ b/runtime/core/session_advanced.h
+@@ -178,6 +178,7 @@
+   absl::Status RewindToStep(int step) override;
+ 
+   // Get the current step of the session.
++  absl::StatusOr<std::string> GetGhostDebugJson(const std::string& request) const override;
+   absl::StatusOr<int> GetCurrentStep() const override;
+ 
+   // Cancels the ongoing inference process.
+--- a/runtime/core/session_advanced.cc
++++ b/runtime/core/session_advanced.cc
+@@ -557,6 +557,12 @@
+   return execution_manager_lock->SetCurrentStep(*session_info_, step);
+ }
+ 
++absl::StatusOr<std::string> SessionAdvanced::GetGhostDebugJson(const std::string& request) const {
++  auto manager=execution_manager_.lock();
++  if(!manager)return absl::FailedPreconditionError("Execution manager is unavailable.");
++  return manager->GetGhostDebugJson(*session_info_,request);
++}
++
+ absl::StatusOr<int> SessionAdvanced::GetCurrentStep() const {
+   auto execution_manager_lock = execution_manager_.lock();
+   if (execution_manager_lock == nullptr) {
+--- a/runtime/framework/resource_management/resource_manager.cc
++++ b/runtime/framework/resource_management/resource_manager.cc
+@@ -403,6 +403,10 @@
+     return llm_executor_->UpdateExecutorSettings(executor_settings);
+   }
+ 
++  absl::StatusOr<std::string> GetGhostDebugJson(const std::string& request) const override {
++    return llm_executor_->GetGhostDebugJson(request);
++  }
++
+   absl::StatusOr<int> GetCurrentStep() const override {
+     return llm_executor_->GetCurrentStep();
+   }
+--- a/runtime/executor/llm_litert_npu_compiled_model_executor.h
++++ b/runtime/executor/llm_litert_npu_compiled_model_executor.h
+@@ -148,6 +148,8 @@
+   // Gets the current step of the executor.
+   // Public API, the return value is the current step that user expects (e.g.
+   // users prefill 100 tokens, then they expect the current step to be 100).
++  absl::StatusOr<std::string> GetGhostDebugJson(const std::string& request) const override;
++
+   absl::StatusOr<int> GetCurrentStep() const override { return current_step_; }
+ 
+   absl::StatusOr<int> GetVocabSize() override;
+--- a/runtime/executor/llm_litert_npu_compiled_model_executor.cc
++++ b/runtime/executor/llm_litert_npu_compiled_model_executor.cc
+@@ -20,6 +20,13 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <memory>
++#include <map>
++#include <chrono>
++#include <cerrno>
++#include <cstring>
++#include <sstream>
++#include <unistd.h>
++#include "nlohmann/json.hpp"
+ #include <optional>
+ #include <string>
+ #include <utility>
+@@ -2148,6 +2155,125 @@
+       start_step, ActiveContextGroup().verify_aux_signatures.cache_update);
+ }
+ 
++
++absl::StatusOr<std::string> LlmLiteRtNpuCompiledModelExecutor::GetGhostDebugJson(const std::string& request) const {
++  using Json=nlohmann::ordered_json;
++  const auto query=Json::parse(request,nullptr,false);
++  if(query.is_discarded()||!query.is_object())return absl::InvalidArgumentError("Invalid debug request.");
++  const int selected_layer=query.value("layer",-1), selected_slot=query.value("slot",-1), fd=query.value("fd",-1);
++  const std::string format=query.value("format",std::string("inspect"));
++  const bool token_csv=format=="tokens_csv", kv_csv=format=="kv_csv", kv_raw=format=="kv_raw";
++  if(format!="inspect"&&!token_csv&&!kv_csv&&!kv_raw)return absl::InvalidArgumentError("Unsupported export format.");
++  if((token_csv||kv_csv||kv_raw)&&fd<0)return absl::InvalidArgumentError("An export file is required.");
++  if(selected_layer<-1||selected_slot<-1)return absl::InvalidArgumentError("Invalid layer or slot.");
++  auto write_bytes=[&](const void* data,size_t size)->absl::Status {
++    const char* bytes=static_cast<const char*>(data);
++    while(size){ssize_t count=::write(fd,bytes,size);if(count<0&&errno==EINTR)continue;
++      if(count<=0)return absl::InternalError("Could not write the export file.");bytes+=count;size-=count;}
++    return absl::OkStatus();
++  };
++  auto address=[](const void* pointer){std::ostringstream out;out<<"0x"<<std::hex<<reinterpret_cast<uintptr_t>(pointer);return out.str();};
++  auto hex=[](const unsigned char* data,size_t size){std::string out;out.reserve(size*2);static const char digits[]="0123456789abcdef";
++    for(size_t i=0;i<size;++i){out.push_back(digits[data[i]>>4]);out.push_back(digits[data[i]&15]);}return out;};
++  const auto views=processed_tokens_.GhostStorageViews();
++  const bool pending=!views.empty()&&views[0].pending_id;
++  const int valid=std::max(0,current_step_-(pending?1:0));
++  const auto& group=ActiveContextGroup();
++  const auto stamp=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
++  Json out={{"backend","NPU"},{"step",current_step_},{"kv_positions",valid},{"capture_ns",stamp},
++            {"context_size",group.context_size},{"ringbuffer",group.geometry.uses_ringbuffer},
++            {"source","Live process-owned memory; no retokenization or historical capture"}};
++  if(selected_layer<0&&!kv_csv&&!kv_raw){
++    out["tokens"]=Json::array();out["token_allocations"]=Json::array();
++    if(token_csv){const std::string header="capture_ns,candidate,index,region,address,byte_offset,id_int32,raw_hex_le\n";LITERT_RETURN_IF_ERROR(write_bytes(header.data(),header.size()));}
++    for(size_t candidate=0;candidate<views.size();++candidate){
++      const auto& view=views[candidate];
++      out["token_allocations"].push_back({{"candidate",candidate},{"size",view.size},{"capacity",view.capacity},{"address",address(view.data)}});
++      for(size_t i=0;i<view.capacity+(view.pending_id?1:0);++i){
++        const bool is_pending=i==view.capacity;const size_t position=is_pending?view.size:i;
++        const auto* data=reinterpret_cast<const unsigned char*>(is_pending?view.pending_id:view.data+i);
++        int32_t id;std::memcpy(&id,data,sizeof(id));const std::string raw=hex(data,sizeof(id));
++        const std::string region=is_pending?"pending":(i<view.size?"live":"spare");
++        if(token_csv){std::string row=std::to_string(stamp)+","+std::to_string(candidate)+","+std::to_string(position)+","+region+","+address(data)+","+(is_pending?"":std::to_string(i*sizeof(int)))+","+std::to_string(id)+","+raw+"\n";LITERT_RETURN_IF_ERROR(write_bytes(row.data(),row.size()));}
++        else out["tokens"].push_back({{"candidate",candidate},{"index",position},{"region",region},{"address",address(data)},
++              {"byte_offset",is_pending?-1:static_cast<int64_t>(i*sizeof(int))},{"id",id},{"raw_hex",raw}});
++      }
++    }
++    if(token_csv)return Json({{"exported",true},{"format",format},{"capture_ns",stamp}}).dump();
++  }
++  struct BufferView {int layer;std::string name;const ::litert::TensorBuffer* buffer;Json meta;};
++  std::vector<BufferView> buffers;
++  std::map<int,Json> layers;
++  size_t payload_offset=0;
++  for(const auto& entry:group.input_kv_cache_buffers){
++    const std::string name(entry.first);const auto suffix=name.rfind('_');int layer=-1;
++    if(suffix==std::string::npos||!absl::SimpleAtoi(name.substr(suffix+1),&layer))continue;
++    if(selected_layer>=0&&layer!=selected_layer)continue;
++    const auto& buffer=entry.second;auto type=buffer.TensorType();auto packed=buffer.PackedSize();auto size=buffer.Size();auto offset=buffer.Offset();
++    if(!type.HasValue()||!packed.HasValue()||!size.HasValue()||!offset.HasValue())return absl::InternalError("Cache buffer metadata is unavailable.");
++    // Offset views need backend-specific allocation bounds; never guess/read out of range.
++    if(*offset!=0)return absl::UnimplementedError("Non-zero-offset KV views are not supported by this inspector.");
++    const auto dims=type->Layout().Dimensions();std::vector<size_t> strides(dims.size(),1);size_t elements=1;
++    for(int d=static_cast<int>(dims.size())-1;d>=0;--d){strides[d]=elements;if(dims[d]<=0)return absl::InternalError("Invalid KV dimensions.");elements*=dims[d];}
++    if(type->Layout().HasStrides()){auto declared=type->Layout().Strides();for(size_t d=0;d<dims.size();++d)strides[d]=declared[d];}
++    const size_t width=elements?*packed/elements:0;if(!width)return absl::InternalError("Invalid KV element width.");
++    auto info=group.geometry.kv_buffer_info.find(name);int axis=info==group.geometry.kv_buffer_info.end()?-1:info->second.sequence_axis;
++    bool local=info!=group.geometry.kv_buffer_info.end()&&info->second.is_local;
++    std::string dtype="raw";switch(type->ElementType()){
++      case litert::ElementType::Int8:dtype="int8";break;case litert::ElementType::UInt8:dtype="uint8";break;
++      case litert::ElementType::Int16:dtype="int16";break;case litert::ElementType::Int32:dtype="int32";break;
++      case litert::ElementType::Float16:dtype="float16";break;case litert::ElementType::Float32:dtype="float32";break;default:break;}
++    Json tensor={{"name",name},{"allocated_bytes",*size},{"packed_bytes",*packed},{"tensor_offset",*offset},
++        {"shape",Json::array()},{"strides",strides},{"element_bytes",width},{"dtype",dtype},
++        {"sequence_axis",axis},{"local",local},{"payload_offset",payload_offset}};
++    for(auto d:dims)tensor["shape"].push_back(d);payload_offset+=*size;
++    const int capacity=axis>=0&&axis<dims.size()?dims[axis]:0;tensor["capacity"]=capacity;tensor["active_slots"]=std::min(valid,capacity);
++    buffers.push_back({layer,name,&buffer,tensor});
++  }
++  std::sort(buffers.begin(),buffers.end(),[](const BufferView& a,const BufferView& b){return a.layer==b.layer?a.name<b.name:a.layer<b.layer;});
++  payload_offset=0;for(auto& buffer:buffers){buffer.meta["payload_offset"]=payload_offset;payload_offset+=buffer.meta["allocated_bytes"].get<size_t>();}
++  if(kv_raw){
++    Json manifest=out;manifest["format"]="GHOSTKV1";manifest["byte_order"]="little-endian";manifest["buffers"]=Json::array();
++    for(const auto& b:buffers){auto meta=b.meta;meta["layer"]=b.layer;manifest["buffers"].push_back(meta);}
++    const std::string header=manifest.dump();uint64_t length=header.size();unsigned char length_le[8];for(int i=0;i<8;++i)length_le[i]=(length>>(i*8))&255;
++    LITERT_RETURN_IF_ERROR(write_bytes("GHOSTKV1",8));LITERT_RETURN_IF_ERROR(write_bytes(length_le,8));LITERT_RETURN_IF_ERROR(write_bytes(header.data(),header.size()));
++    for(const auto& b:buffers){auto lock=::litert::TensorBufferScopedLock::Create(*b.buffer,::litert::TensorBuffer::LockMode::kRead);
++      if(!lock.HasValue())return absl::InternalError("KV buffer mapping failed.");LITERT_RETURN_IF_ERROR(write_bytes(lock->second,b.meta["allocated_bytes"].get<size_t>()));}
++    return Json({{"exported",true},{"format",format},{"capture_ns",stamp},{"bytes",payload_offset+16+header.size()}}).dump();
++  }
++  if(kv_csv){std::string header="capture_ns,layer,buffer,dtype,shape,sequence_axis,slot,logical_position,active,address,first_byte_offset,raw_hex_le\n";LITERT_RETURN_IF_ERROR(write_bytes(header.data(),header.size()));}
++  for(auto& b:buffers){
++    Json tensor=b.meta;const int axis=tensor["sequence_axis"],capacity=tensor["capacity"];const bool local=tensor["local"];
++    if((selected_layer>=0||kv_csv)&&capacity>0){
++      auto lock=::litert::TensorBufferScopedLock::Create(*b.buffer,::litert::TensorBuffer::LockMode::kRead);
++      if(!lock.HasValue())return absl::InternalError("KV buffer mapping failed.");
++      const auto* bytes=static_cast<const unsigned char*>(lock->second);tensor["address"]=address(bytes);
++      const auto dims=tensor["shape"].get<std::vector<size_t>>(), strides=tensor["strides"].get<std::vector<size_t>>();
++      const size_t width=tensor["element_bytes"],size=tensor["allocated_bytes"];size_t count=1;for(size_t d=0;d<dims.size();++d)if(d!=axis)count*=dims[d];
++      tensor["samples"]=Json::array();
++      for(int slot=0;slot<capacity;++slot){
++        const bool active=slot<std::min(valid,capacity);int position=slot;
++        if(local&&group.geometry.uses_ringbuffer&&valid>capacity){position=(valid/capacity)*capacity+slot;if(position>=valid)position-=capacity;}
++        std::string raw;bool zero=true;Json offsets=Json::array();const bool full=kv_csv||selected_slot==slot;const size_t wanted=full?count:std::min(count,static_cast<size_t>(16/width));
++        for(size_t component=0;component<wanted;++component){size_t flat=component,element=slot*strides[axis];
++          for(int d=static_cast<int>(dims.size())-1;d>=0;--d)if(d!=axis){element+=(flat%dims[d])*strides[d];flat/=dims[d];}
++          const size_t offset=element*width;if(offset+width>size)return absl::InternalError("KV layout exceeds mapped allocation.");
++          raw+=hex(bytes+offset,width);for(size_t i=0;i<width;++i)zero&=bytes[offset+i]==0;
++          if(!kv_csv&&selected_slot==slot)offsets.push_back(offset);
++        }
++        if(kv_csv){std::string shape;for(auto dim:dims){if(!shape.empty())shape+='x';shape+=std::to_string(dim);}
++          std::string row=std::to_string(stamp)+","+std::to_string(b.layer)+","+b.name+","+tensor["dtype"].get<std::string>()+","+shape+","+std::to_string(axis)+","+std::to_string(slot)+","+std::to_string(active?position:-1)+","+(active?"1":"0")+","+address(bytes)+","+std::to_string(slot*strides[axis]*width)+","+raw+"\n";LITERT_RETURN_IF_ERROR(write_bytes(row.data(),row.size()));}
++        else {Json cell={{"slot",slot},{"position",active?position:-1},{"active",active},{"hex",raw},{"sample_zero",zero},{"full",full},{"elements",wanted},{"byte_offset",slot*strides[axis]*width}};
++          if(full)cell["component_byte_offsets"]=std::move(offsets);tensor["samples"].push_back(std::move(cell));}
++      }
++    }
++    if(!layers.count(b.layer))layers[b.layer]={{"layer",b.layer},{"buffers",Json::array()}};
++    layers[b.layer]["buffers"].push_back(std::move(tensor));
++  }
++  if(kv_csv)return Json({{"exported",true},{"format",format},{"capture_ns",stamp}}).dump();
++  out["layers"]=Json::array();for(auto& layer:layers)out["layers"].push_back(std::move(layer.second));return out.dump();
++}
++
+ absl::Status LlmLiteRtNpuCompiledModelExecutor::SetCurrentStep(int new_step) {
+   const int max_step = processed_tokens_.TokenCount();
+   if (new_step != (max_step - 1)) {
+--- a/runtime/executor/BUILD
++++ b/runtime/executor/BUILD
+@@ -553,6 +553,7 @@
+     srcs = ["llm_litert_npu_compiled_model_executor.cc"],
+     hdrs = ["llm_litert_npu_compiled_model_executor.h"],
+     deps = [
++        "@nlohmann_json//:json",
+         ":litert_compiled_model_executor_utils",
+         ":llm_executor",
+         ":llm_executor_io_types",
+--- a/runtime/executor/llm_executor_processed_tokens.h
++++ b/runtime/executor/llm_executor_processed_tokens.h
+@@ -37,6 +37,7 @@
+         per_layer_embedding_(std::move(token_per_layer_embedding)) {}
+ 
+   int id() const { return id_; }
++  const int* GhostIdAddress() const { return &id_; }
+ 
+   absl::Span<const float> embedding() const { return embedding_; }
+   std::vector<float>& mutable_embedding() { return embedding_; }
+@@ -91,6 +92,15 @@
+   // Returns the number of processed tokens inclusive of the pending input
+   // token, if any.
+   int TokenCount() const;
++  struct GhostStorageView {
++    const int* data;
++    size_t size;
++    size_t capacity;
++    const int* pending_id;
++  };
++  // Non-owning views, valid only while the owning executor is locked.
++  std::vector<GhostStorageView> GhostStorageViews() const;
++
+ 
+   // Reduces the token candidates to 1 with one of given index.
+   // It will be called when LLM switches from decode to prefill.
+--- a/runtime/executor/llm_executor_processed_tokens.cc
++++ b/runtime/executor/llm_executor_processed_tokens.cc
+@@ -29,6 +29,13 @@
+ // tokens_ must have at least one element.
+ ProcessedTokens::ProcessedTokens() : tokens_(1) {}
+ 
++std::vector<ProcessedTokens::GhostStorageView> ProcessedTokens::GhostStorageViews() const {
++  std::vector<GhostStorageView> views;
++  for(const auto& t:tokens_)views.push_back({t.token_ids.data(),t.token_ids.size(),
++      t.token_ids.capacity(),t.pending_input_token?t.pending_input_token->GhostIdAddress():nullptr});
++  return views;
++}
++
+ int ProcessedTokens::TokenCount() const {
+   return GetStep() + (HasPendingInputToken() ? 1 : 0);
+ }

@@ -1,0 +1,27 @@
+--- a/runtime/executor/llm_litert_npu_compiled_model_executor.cc
++++ b/runtime/executor/llm_litert_npu_compiled_model_executor.cc
+@@ -2178,7 +2178,7 @@
+   const int selected_layer=query.value("layer",-1), selected_slot=query.value("slot",-1), fd=query.value("fd",-1);
+   const std::string format=query.value("format",std::string("inspect"));
+   const bool token_csv=format=="tokens_csv", kv_csv=format=="kv_csv", kv_raw=format=="kv_raw";
+-  if(format!="inspect"&&!token_csv&&!kv_csv&&!kv_raw)return absl::InvalidArgumentError("Unsupported export format.");
++  if(format!="inspect"&&format!="addresses"&&!token_csv&&!kv_csv&&!kv_raw)return absl::InvalidArgumentError("Unsupported export format.");
+   if((token_csv||kv_csv||kv_raw)&&fd<0)return absl::InvalidArgumentError("An export file is required.");
+   if(selected_layer<-1||selected_slot<-1)return absl::InvalidArgumentError("Invalid layer or slot.");
+   auto write_bytes=[&](const void* data,size_t size)->absl::Status {
+@@ -2191,6 +2191,15 @@
+   auto hex=[](const unsigned char* data,size_t size){std::string out;out.reserve(size*2);static const char digits[]="0123456789abcdef";
+     for(size_t i=0;i<size;++i){out.push_back(digits[data[i]>>4]);out.push_back(digits[data[i]&15]);}return out;};
+   const auto views=processed_tokens_.GhostStorageViews();
++  if(format=="addresses"){
++    Json metadata={{"token_allocations",Json::array()},{"pending_addresses",Json::array()}};
++    for(size_t candidate=0;candidate<views.size();++candidate){
++      const auto& view=views[candidate];
++      metadata["token_allocations"].push_back({{"candidate",candidate},{"size",view.size},{"capacity",view.capacity},{"address",address(view.data)}});
++      if(view.pending_id)metadata["pending_addresses"].push_back({{"candidate",candidate},{"address",address(view.pending_id)}});
++    }
++    return metadata.dump();
++  }
+   const bool pending=!views.empty()&&views[0].pending_id;
+   const int valid=std::max(0,current_step_-(pending?1:0));
+   const auto& group=ActiveContextGroup();

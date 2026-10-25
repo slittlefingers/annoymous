@@ -1,0 +1,7 @@
+2026-10-15 Pixel 10, KV component table display.
+assembleDebug + lintDebug passed. New APK installed.
+Verified Layer 0 -> K buffer -> slot 0 table on device.
+Four real columns: Component, Byte offset, Value, Raw LE. UI hierarchy confirms identical horizontal column boundaries across all visible header and data rows.
+After vertical scrolling, multi-digit component indices appear and header remains at the same screen position.
+Column widths are measured from header and all displayed values; numeric columns align right. Horizontal scrolling handles total width exceeding the dialog.
+Only Java rendering changed; native reads and exports unchanged.

@@ -1,0 +1,19 @@
+--- a/c/BUILD
++++ b/c/BUILD
+@@ -477,6 +477,7 @@
+ cc_binary(
+     name = "litert-lm",
+     srcs = [
++        "ghost_multimodal.cc",
+         "conversation.cc",
+         "embedding_engine.cc",
+         "engine.cc",
+@@ -505,6 +506,8 @@
+     }),
+     linkshared = 1,
+     deps = ENGINE_COMMON_DEPS + [
++        "//runtime/conversation/model_data_processor:model_data_processor_factory",
++        "//runtime/conversation/model_data_processor:model_data_processor",
+         ":conversation_headers",
+         ":embedding_engine_headers",
+         ":engine_headers",

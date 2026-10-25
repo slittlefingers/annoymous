@@ -1,0 +1,25 @@
+Pixel 10 timed unload experiment — 2026-10-15
+
+Model: Gemma3-1B-IT_q8_ekv1280_Google_Tensor_G5.litertlm.
+Synthetic prompt: Remember the word sunflower. Reply with sunflower only.
+Each sampled array had size 21 int32 elements, capacity 36, total sampled 144 bytes.
+Scenarios: native_quiet Normal/Ghost; actual MainActivity No model Normal/Ghost. One trial per combination, six checkpoints per trial.
+Times: 0, 1, 2, 5, 10, 20 seconds. See actual elapsed_ms in results.json.
+
+Native quiet: delete Session then engine; retain only the small JNI Model wrapper until the test finally closes it. All timed reads and formatting use stack storage. No Java result allocation until the whole 20-second series finishes. This does not stop other process/runtime threads from allocating.
+UI No model: actual selectNoModel() with Debug enabled, including address-only capture, complete NativeModel.close(), status updates and disabled composer. No replacement model is loaded. Timed probe returns a JSON object to Java after each read, which can allocate. Time zero is after the UI operation reports not busy, so it is not the exact nanosecond of free.
+Both scenarios: mincore checks page residency before each process_vm_readv; Android pointer top-byte tag stripped. Measurements read all 144 bytes. Reporting/sampling can affect allocation and residency. No app memory pressure was deliberately induced and no other app actions were scheduled during the 20-second windows.
+
+Results:
+Normal/native quiet: all 144 bytes exactly equal to pre-unload contents at every checkpoint, 21/21 original in-size positive IDs match.
+Normal/UI No model: same result, all 144 bytes and all 21 IDs unchanged through 20 seconds.
+Ghost/native quiet and Ghost/UI: consumed in-size IDs were already zero before unloading. At the first post-unload sample only 88/144 bytes matched the baseline, with 13/36 raw int32 slots zero. All subsequent samples were byte-for-byte identical to that first post-unload sample through 20 seconds.
+All 24 checkpoints: mincore succeeded, sampled page resident before read, 144/144 bytes readable.
+
+Interpretation:
+This run directly demonstrates recovery of the original Normal-mode token array for at least 20 seconds after unloading, including the actual No model UI path. Mere elapsed time did not remove those bytes in this run. Ghost changes were already present at the first post-unload checkpoint; there was no later time-dependent change within the sampled window.
+Nonzero Ghost post-free bytes are not confirmed token IDs; original ownership is unknown. This experiment cannot observe/prove a transient scrub before allocation reuse. It does not test pending-ID storage or KV buffers.
+Mapped/resident page observations do not establish physical PFN identity or exclude intervening discard/remap. Sampling itself reads and can keep pages active. Persistence duration depends on allocator reuse, process activity and memory pressure; this is not a guarantee of retention or erasure after 20 seconds.
+
+Validation: Android instrumentation PASS, 1 test, 94.102 seconds.
+After collecting results, temporary JNI/test instrumentation is removed and the normal APK rebuilt/reinstalled.

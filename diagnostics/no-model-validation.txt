@@ -1,0 +1,4 @@
+assembleDebug + lintDebug PASS.
+Pixel NoModelDeviceTest PASS (1 test, 4.620 sec).
+Validated live model -> No model (handle zero; old addresses retained; input/send disabled; debug tools enabled) -> No model again (still unloaded) -> Gemma3 NPU reload (handle nonzero).
+APK installed and public copies refreshed.

@@ -1,0 +1,9 @@
+Pixel 10, Android 16, connected device validation on 2026-10-15 Australia/Melbourne.
+Matching dispatch/runtime LiteRT revision: 26895c9fbcc25c43faa8c1a98cd1fd28951602c3.
+NPU initialization: passed.
+Turn 1 asked to remember 42: response OK.
+Turn 2 asked which number: response You asked me to remember the number **42**.
+Both turns used the same running process (pid 12125) and Session.
+Create new session: returned ready, latest reply display cleared, process remained alive.
+No SIGSEGV in fixed-device-log.txt.
+This is a short smoke test, not a long-duration stability or memory-erasure audit.

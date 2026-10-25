@@ -1,0 +1,14 @@
+diff --git a/runtime/executor/llm_litert_npu_compiled_model_executor.cc b/runtime/executor/llm_litert_npu_compiled_model_executor.cc
+index d96a38a5..91984d4d 100644
+--- a/runtime/executor/llm_litert_npu_compiled_model_executor.cc
++++ b/runtime/executor/llm_litert_npu_compiled_model_executor.cc
+@@ -946,6 +946,9 @@ LlmLiteRtNpuCompiledModelExecutor::DecodeNonSpeculative(
+         absl::ToInt64Microseconds(absl::Now() - start_sample);
+     ++current_step_;
+     ran_decode_ = true;
++    // Match DecodeLogits: wipe consumed history while preserving the frontier
++    // token and position accounting. The constrained path is scrubbed there.
++    processed_tokens_.ScrubConsumedValues(current_step_ - 1);
+   }
+ 
+   std::shared_ptr<TokenData> last_output_token =

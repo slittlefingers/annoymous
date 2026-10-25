@@ -1,0 +1,17 @@
+2026-10-15, Pixel 10 (connected device)
+Android ARM64 native runtime build: passed
+Gradle assembleDebug, lintDebug: passed
+MemoryInspectionDeviceTest.actualAllocationsAndExports: OK (1 test), 5.09 s
+Verified int32/raw-byte consistency, token CSV header and row count, KV CSV header and row count, selected-layer raw allocation lengths and manifest offsets, exact component bytes across inspect and raw export, unchanged session step after reads and export, zero session step after reset.
+UI hierarchy verification: Debug off hides Token IDs and KV Cache; Debug on exposes them below switch; KV layer list -> K/V tabs -> paginated slot grid -> component detail with offsets and actual raw values. No chat widgets added.
+No private conversations or user media were used in validation. Test captures deleted by test cleanup.
+MultimodalDeviceTest.imageAudioAndSessionContext: OK (1 test), 3.895 s. Image, audio, following-turn context and corrupt image handling passed with the new runtime.
+
+Follow-up scrub regression, 2026-10-15:
+Baseline APK reproduced missing unconstrained non-speculative decode scrub: consumed text ID assertion failed at synthetic input index 12.
+Applied runtime-extension/npu-nonspeculative-scrub.patch (existing work-branch fix) to packaged runtime.
+Added first- and second-turn consumed-ID zero assertions, and previous-reply recall via retained KV.
+Full device suite: OK (2 tests), 8.078 s. MemoryInspectionDeviceTest and MultimodalDeviceTest passed.
+Gradle assembleDebug, assembleDebugAndroidTest, lintDebug: passed.
+Token UI now says In-size (index below vector size), not Live. Total slots include spare capacity and pending storage; zero values remain in-size for position accounting.
+APK SHA256: 309578c79bdf8803b5cd233bdcc9f679d8983756dc6a043d1480a55dcb6f7703

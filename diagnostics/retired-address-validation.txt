@@ -1,0 +1,6 @@
+assembleDebug + lintDebug PASS.
+Runtime address-only metadata patch compiled on Android arm64.
+Pixel RetiredMemoryDeviceTest + Gemma3DeviceTest PASS (2 tests, 6.857 sec).
+Native kernel read agrees with live int32; released address safely readable/unreadable; invalid address handled without crash.
+Only one previous engine metadata retained while Debug enabled; no old values or physical-address claim.
+On-device UI: previous Token array C0 opened; read 144/144 bytes successfully from released tagged address. Grid displayed current int32 values; ownership unknown.

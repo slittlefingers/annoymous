@@ -1,0 +1,7 @@
+2026-10-15 Pixel 10. assembleDebug and lintDebug passed.
+Verified live KV navigation:
+- Slot details top-left Back -> same layer's block grid.
+- Reopen slot, Android Back -> same layer's block grid.
+- Layer Back -> preserved layer list.
+Token block detail confirmation button now says Back.
+Only debug UI navigation changed; native memory reads unchanged.

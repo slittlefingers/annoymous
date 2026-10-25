@@ -1,0 +1,7 @@
+Actual UI test on Pixel 10, no temporary native test API.
+Gemma 4 E2B, Normal chat, Debug enabled. Typed: Reply with only hello.
+Opened Token IDs and captured displayed Processed grid, then chose No model, confirmed Engine unloaded, opened Previous model addresses -> Token array C0.
+15 original processed positions #0..#14 all equal before/after (15/15).
+Previous-address page additionally shows capacity positions #15..#25, formerly spare raw bytes; they are not additional valid tokens. Pending ID is a separate allocation and was not compared in this UI run.
+UI XML captures and comparison.json are synthetic-test evidence only; no app value logging was introduced.
+App left showing the previous-address token grid with engine unloaded.

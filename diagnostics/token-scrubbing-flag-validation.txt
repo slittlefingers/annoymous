@@ -1,0 +1,18 @@
+2026-10-15 Pixel 10, opt-in NPU token-ID scrubbing.
+Default native NpuConfig.enable_token_id_scrubbing=false.
+CLI: --enable_npu_token_id_scrubbing=true (both main binaries compiled).
+C API: litert_lm_engine_settings_set_npu_token_id_scrubbing(settings, enabled).
+Ghost calls NativeModel.openWithTokenIdScrubbing(..., true) explicitly.
+
+Android ARM64 builds passed for liblitert-lm, both CLI binaries, and native test executables.
+Native tests run on Pixel: 34 passed:
+29 ProcessedTokens tests; NpuConfigDefaults (including aggregate compatibility); 2 C API settings tests; settings propagation test; unsupported generic NPU rejection test.
+For settings-only C cases, the temporary build checkout's engine_test platform restriction was removed for cross-compiling the test runner. It was restored afterwards; the repository build restriction is unchanged. Standalone executables ran with the model fixture under TEST_SRCDIR and the matching constraint-provider library under LD_LIBRARY_PATH.
+
+Gradle assembleDebug, assembleDebugAndroidTest, lintDebug passed.
+Device instrumentation: OK (3 tests), 11.941 s:
+MemoryInspectionDeviceTest, MultimodalDeviceTest, TokenScrubbingFlagDeviceTest.
+A/B false vs true: consumed positive IDs retained vs cleared; two greedy replies identical; active KV slot bytes identical; follow-up uses retained KV context; reset retains original array capacity when disabled vs clears/releases it when enabled.
+The A/B checks apply to the tested Gemma 4 E2B Tensor G5 model and greedy two-turn case, not every model or decoding mode.
+
+No allocation-tracing hooks or per-turn debug logging were introduced. Native default-off policy and Ghost explicit opt-in are separate from the APK Debug UI switch.

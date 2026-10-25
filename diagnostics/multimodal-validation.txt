@@ -1,0 +1,9 @@
+Pixel 10, Android 16.
+Android instrumentation test: OK (1 test), 4.778 seconds.
+Prepared red image -> response: Red
+Same Session, following text-only turn -> response: Red
+New Session, synthetic speech (The secret number is forty two.) -> response: The sacred number is 42.
+Speech recognized the number; transcription is not exact.
+Corrupt image -> caught IllegalStateException, no process crash.
+Image orientation/downsampling and imported-audio validation ran through MediaFiles in the test.
+UI attachment menu and microphone controls verified present; hardware microphone capture is not included in this automated test.

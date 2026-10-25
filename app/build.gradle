@@ -1,0 +1,34 @@
+plugins { id 'com.android.application' }
+android {
+ namespace 'com.example.annoymous'
+ compileSdk 35
+ defaultConfig { applicationId 'com.example.annoymous'; minSdk 31; targetSdk 35; versionCode 1; versionName '0.1'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'; ndk { abiFilters 'arm64-v8a' } }
+ packaging { jniLibs { useLegacyPackaging = true } }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+def nativeDir = file('src/main/jniLibs/arm64-v8a')
+def sdkProps = new Properties()
+rootProject.file('local.properties').withInputStream { sdkProps.load(it) }
+def ndkPath = System.getenv('ANDROID_NDK_HOME') ?: "${sdkProps.getProperty('sdk.dir')}/ndk/30.0.14904198"
+def nativeBridge = tasks.register('compileNativeBridge', Exec) {
+ inputs.file('src/main/cpp/bridge.c')
+ inputs.dir('src/main/cpp/include')
+ inputs.file(new File(nativeDir, 'liblitert-lm.so'))
+ outputs.file(new File(nativeDir, 'libannoymous.so'))
+ commandLine "${ndkPath}/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android31-clang",
+  '-shared', '-fPIC', '-O2', '-I', file('src/main/cpp/include'), file('src/main/cpp/bridge.c'),
+  '-L', nativeDir, '-llitert-lm', '-Wl,-z,max-page-size=16384', '-Wl,--no-undefined',
+  '-o', new File(nativeDir, 'libannoymous.so')
+}
+tasks.named('preBuild').configure { dependsOn nativeBridge }
+
+dependencies {
+ implementation 'androidx.core:core:1.13.1'
+ androidTestImplementation 'androidx.test:runner:1.6.2'
+ androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+ implementation 'androidx.exifinterface:exifinterface:1.3.7'
+ implementation 'io.noties.markwon:core:4.6.2'
+ implementation 'io.noties.markwon:ext-tables:4.6.2'
+ implementation 'io.noties.markwon:ext-strikethrough:4.6.2'
+}

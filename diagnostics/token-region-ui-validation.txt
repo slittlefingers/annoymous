@@ -1,0 +1,7 @@
+2026-10-15 Pixel 10: token display separates array storage from pending allocation.
+assembleDebug + lintDebug: passed.
+Device UI verified with a synthetic greeting:
+Processed and Spare selectors show separate subsets with the same array base address, correct [begin,end) ranges and 4-byte slot spacing.
+Pending remains in its own card, with a distinct address and logical next position. Pending detail identifies region pending and omits array offset.
+Processed -> Spare switch and Pending detail click passed. CSV still exports all regions through the unchanged native path.
+No native runtime or memory-read changes. No automatic debug captures added.

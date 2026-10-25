@@ -1,0 +1,9 @@
+Gemma3 G5 Q8 downloaded at d448835d84411a08f577e25f3afebe528402d73b.
+SHA256 verified: 1ed29548b302764ce32ebf03d7df8fff943218b76d14230e97ee4bd0224cd8d1
+File: Gemma3-1B-IT_q8_ekv1280_Google_Tensor_G5.litertlm (1678542365 bytes).
+Pixel: Gemma3DeviceTest and TokenScrubbingFlagDeviceTest PASS (2 tests, 11.239 sec).
+Gemma3 test covers NPU Normal/Ghost two-turn recall and actual consumed token IDs retained/cleared.
+E2B regression covers replies, KV equivalence and reset behavior.
+assembleDebug + assembleDebugAndroidTest + lintDebug PASS.
+E4B file deleted from computer and device; model selector replaced.
+Gemma3 text-only encoders disabled, 1280-token context, Gemma3 turn template.

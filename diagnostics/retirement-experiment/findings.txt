@@ -1,0 +1,37 @@
+Pixel 10 staged token-array retirement experiment
+Date: 2026-10-15 Australia/Melbourne
+Synthetic prompt only. Gemma3 G5 Q8 -> Gemma4 E2B G5. Normal and Ghost, 3 trials each.
+Old array size=21 int32 slots, capacity=36, sampled bytes=144.
+The native probe deletes Session/engine and immediately samples mincore residency BEFORE process_vm_readv, using stack buffers. JSON result objects can themselves allocate and influence subsequent reuse.
+All 24 checkpoints: mincore success, sampled page resident before reading, 144/144 bytes readable.
+
+Normal results:
+ghost=False trial=0 stage=before_close: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=0 stage=after_session_delete: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=0 stage=after_engine_delete: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=0 stage=after_new_model_load: exact_byte_match=False, same_original_in_size_positive_values=5/21, zero_slots=13/36
+ghost=False trial=1 stage=before_close: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=1 stage=after_session_delete: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=1 stage=after_engine_delete: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=1 stage=after_new_model_load: exact_byte_match=False, same_original_in_size_positive_values=5/21, zero_slots=13/36
+ghost=False trial=2 stage=before_close: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=2 stage=after_session_delete: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=2 stage=after_engine_delete: exact_byte_match=True, same_original_in_size_positive_values=21/21, zero_slots=8/36
+ghost=False trial=2 stage=after_new_model_load: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=0 stage=before_close: exact_byte_match=True, same_original_in_size_positive_values=0/21, zero_slots=29/36
+ghost=True trial=0 stage=after_session_delete: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=0 stage=after_engine_delete: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=0 stage=after_new_model_load: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=1 stage=before_close: exact_byte_match=True, same_original_in_size_positive_values=0/21, zero_slots=29/36
+ghost=True trial=1 stage=after_session_delete: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=1 stage=after_engine_delete: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=1 stage=after_new_model_load: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=2 stage=before_close: exact_byte_match=True, same_original_in_size_positive_values=0/21, zero_slots=29/36
+ghost=True trial=2 stage=after_session_delete: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=2 stage=after_engine_delete: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+ghost=True trial=2 stage=after_new_model_load: exact_byte_match=False, same_original_in_size_positive_values=0/21, zero_slots=13/36
+
+Conclusion: In all 3 Normal trials, all 144 bytes including the 21 original positive token IDs survived Session deletion and engine destruction unchanged. This is direct evidence that those bytes remained recoverable at these checkpoints. They changed only after loading the next model (5,5,0 of 21 original same-position IDs then matched; incidental matches after reuse do not establish ownership).
+Ghost consumed positions were already zero before close. After Session deletion the allocation showed other data. This experiment does NOT isolate or prove the transient zero-write performed by ScrubAll before reuse, nor cover pending-ID storage or other token copies.
+A mapped/resident virtual page does not establish physical PFN identity or prove that no madvise/unmap/remap occurred between checkpoints. No page-table/PFN access or syscall trace was used. This is not a universal allocator guarantee, especially for larger/mmap-backed KV buffers.
+Production restored: diagnostic-only stageProbe JNI and test class removed from app sources after experiment; normal APK rebuilt and installed.
